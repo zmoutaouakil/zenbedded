@@ -42,6 +42,45 @@ config ZENBEDDED_COMMON_WIFI
     help
       Connect over 802.11 Wi-Fi station mode using stored credentials.
 
+config ZENBEDDED_COMMON_ETHERNET
+    bool "Wired Ethernet Interface"
+    default n
+    select NET_L2_ETHERNET
+    select NET_DHCPV4
+    help
+      Connect over the board's native Ethernet MAC (e.g. STM32 boards
+      with an on-board PHY) and acquire an IPv4 address via DHCP.
+
+config ZENBEDDED_ETHERNET_CARRIER_TIMEOUT_MS
+    int "Ethernet link (carrier) timeout in milliseconds"
+    depends on ZENBEDDED_COMMON_ETHERNET
+    default 5000
+    help
+      How long to wait for the PHY to report a link before giving up.
+      PHY auto-negotiation typically takes 2-3 seconds after boot.
+
+if ZENBEDDED_COMMON_ETHERNET
+
+    config ZENBEDDED_ETHERNET_STATIC_IP
+        bool "Use a static IPv4 address on Ethernet instead of DHCP"
+        default n
+        help
+          Assign a fixed IPv4 address to the Ethernet interface. Useful for
+          a direct board-to-PC cable or an emulator TAP link, where no DHCP
+          server is present.
+
+    config ZENBEDDED_ETHERNET_MY_IPV4_ADDR
+        string "Device Ethernet IPv4 address"
+        depends on ZENBEDDED_ETHERNET_STATIC_IP
+        default "198.51.100.2"
+
+    config ZENBEDDED_ETHERNET_NETMASK
+        string "Device Ethernet IPv4 netmask"
+        depends on ZENBEDDED_ETHERNET_STATIC_IP
+        default "255.255.255.0"
+
+endif # ZENBEDDED_COMMON_ETHERNET
+
 config NET_MAX_CONTEXTS
     default 10 if ZENBEDDED_COMMON_USB_CDC && ZENBEDDED_COMMON_WIFI
 

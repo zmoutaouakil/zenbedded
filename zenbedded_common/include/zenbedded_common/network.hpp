@@ -38,6 +38,21 @@ int init_wifi(net_if * iface = nullptr);
 int init_usbd(net_if * iface = nullptr);
 
 /**
+ * @brief Bring up the native wired Ethernet interface and acquire an IPv4 address via DHCP.
+ *
+ * @param iface Target interface (or nullptr to auto-discover the first non-USB Ethernet iface).
+ * @return 0 on success, -ENOTCONN if no link, negative errno on other failures or timeout.
+ */
+int init_ethernet(net_if * iface = nullptr);
+
+/**
+ * @brief Checks whether the native Ethernet interface is up and has an assigned IPv4 address.
+ *
+ * @return true if the Ethernet interface is up and has an active IPv4 address.
+ */
+bool is_ethernet_ready();
+
+/**
  * @brief Initialize all enabled network interfaces (USB CDC ECM and/or Wi-Fi).
  *
  * Supports bringing up both interfaces simultaneously when both are enabled.

@@ -16,3 +16,7 @@ tests:
     platform_allow:
       - esp32s3_devkitc/esp32s3/procpu
     extra_args: SNIPPET="cdc-ecm;wifi"
+  sample.zenbedded.sine_wave_tier1.ethernet:
+    platform_allow:
+      - stm32f746g_disco
+    extra_args: SNIPPET=ethernet

@@ -42,6 +42,11 @@
 #endif
 #endif
 
+#if defined(CONFIG_ZENBEDDED_COMMON_ETHERNET)
+#include <zephyr/net/dhcpv4.h>
+#include <zephyr/net/ethernet.h>
+#endif
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -239,9 +244,129 @@ int init_usbd(net_if * iface)
 }
 #endif  // CONFIG_ZENBEDDED_COMMON_USB_CDC
 
+#if defined(CONFIG_ZENBEDDED_COMMON_ETHERNET)
+namespace
+{
+// Returns the first Ethernet interface that is not the USB CDC ECM one, so
+// the native MAC is picked even when both transports are enabled.
+net_if * find_ethernet_iface()
+{
+  const struct device * cdc_dev = nullptr;
+#if defined(CONFIG_USBD_CDC_ECM_CLASS)
+  cdc_dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(cdc_ecm_eth0));
+#endif
+
+  struct Search
+  {
+    const struct device * skip;
+    net_if * found;
+  } search{cdc_dev, nullptr};
+
+  net_if_foreach(
+    [](struct net_if * iface, void * user_data)
+    {
+      auto * s = static_cast<Search *>(user_data);
+      if (
+        s->found == nullptr && net_if_l2(iface) == &NET_L2_GET_NAME(ETHERNET) &&
+        net_if_get_device(iface) != s->skip)
+      {
+        s->found = iface;
+      }
+    },
+    &search);
+
+  return search.found;
+}
+}  // namespace
+
+int init_ethernet(net_if * iface)
+{
+  if (iface == nullptr)
+  {
+    iface = find_ethernet_iface();
+  }
+  if (iface == nullptr)
+  {
+    LOG_ERR("No Ethernet interface found");
+    return -ENODEV;
+  }
+
+  LOG_INF("Waiting for Ethernet link...");
+  uint32_t carrier_timer = k_uptime_get_32();
+  while (!net_if_is_carrier_ok(iface))
+  {
+    if (k_uptime_get_32() - carrier_timer > CONFIG_ZENBEDDED_ETHERNET_CARRIER_TIMEOUT_MS)
+    {
+      LOG_INF("Ethernet link down (cable unplugged?), skipping Ethernet transport");
+      return -ENOTCONN;
+    }
+    k_sleep(K_MSEC(100));
+  }
+
+#if defined(CONFIG_ZENBEDDED_ETHERNET_STATIC_IP)
+  in_addr my_addr;
+  in_addr netmask;
+  if (
+    net_addr_pton(AF_INET, CONFIG_ZENBEDDED_ETHERNET_MY_IPV4_ADDR, &my_addr) != 0 ||
+    net_addr_pton(AF_INET, CONFIG_ZENBEDDED_ETHERNET_NETMASK, &netmask) != 0)
+  {
+    LOG_ERR("Invalid static Ethernet IPv4 address or netmask in Kconfig");
+    return -EINVAL;
+  }
+  if (net_if_ipv4_addr_add(iface, &my_addr, NET_ADDR_MANUAL, 0) == nullptr)
+  {
+    LOG_ERR("Failed to add static IPv4 address to Ethernet interface");
+    return -ENOMEM;
+  }
+  net_if_ipv4_set_netmask_by_addr(iface, &my_addr, &netmask);
+  LOG_INF("Ethernet link up, using static IPv4 address");
+#else
+  LOG_INF("Ethernet link up, requesting IPv4 address via DHCP...");
+  net_dhcpv4_start(iface);
+#endif
+
+  uint32_t timer = k_uptime_get_32();
+  while (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) == nullptr)
+  {
+    if (k_uptime_get_32() - timer > kIpv4AcquireTimeout)
+    {
+      LOG_ERR("No IPv4 address on Ethernet within %u ms", kIpv4AcquireTimeout);
+      return -ETIMEDOUT;
+    }
+    k_sleep(K_MSEC(200));
+  }
+
+  char addr_str[NET_IPV4_ADDR_LEN];
+  net_addr_ntop(
+    AF_INET, net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED), addr_str, sizeof(addr_str));
+  LOG_INF("Got IPv4 address via Ethernet: %s", addr_str);
+
+  return 0;
+}
+
+bool is_ethernet_ready()
+{
+  net_if * iface = find_ethernet_iface();
+  return iface != nullptr && net_if_is_up(iface) &&
+         (net_if_ipv4_get_global_addr(iface, NET_ADDR_PREFERRED) != nullptr);
+}
+#else
+int init_ethernet(net_if * iface)
+{
+  (void)iface;
+  LOG_WRN("Ethernet transport not enabled in Kconfig");
+  return -ENOTSUP;
+}
+
+bool is_ethernet_ready() { return false; }
+#endif  // CONFIG_ZENBEDDED_COMMON_ETHERNET
+
 int init_network()
 {
-#if defined(CONFIG_ZENBEDDED_COMMON_USB_CDC) && defined(CONFIG_ZENBEDDED_COMMON_WIFI)
+#if defined(CONFIG_ZENBEDDED_COMMON_ETHERNET) && !defined(CONFIG_ZENBEDDED_COMMON_USB_CDC) && \
+  !defined(CONFIG_ZENBEDDED_COMMON_WIFI)
+  return init_ethernet();
+#elif defined(CONFIG_ZENBEDDED_COMMON_USB_CDC) && defined(CONFIG_ZENBEDDED_COMMON_WIFI)
   int usb_ret = init_usbd();
   if (usb_ret != 0)
   {
